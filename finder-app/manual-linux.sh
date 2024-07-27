@@ -37,7 +37,11 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
     git checkout ${KERNEL_VERSION}
 
     # Note: "'multiple definition of yylloc'" (https://github.com/BPI-SINOVOIP/BPI-M4-bsp/issues/4)
-    sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' "${OUTDIR}/linux-stable/scripts/dtc/dtc-lexer.l"
+    # Check if the file "${OUTDIR}/linux-stable/scripts/dtc/dtc-lexer.l" already contains "extern YYLTYPE yylloc;"
+    if ! grep -q "extern YYLTYPE yylloc;" "${OUTDIR}/linux-stable/scripts/dtc/dtc-lexer.l"; then
+        # If not, replace "YYLTYPE yylloc;" with "extern YYLTYPE yylloc;"
+        sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/g' "${OUTDIR}/linux-stable/scripts/dtc/dtc-lexer.l"
+    fi
 
     # "deep clean" the kernel build tree: removing the .config file with any existing configurations
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} mrproper
