@@ -110,20 +110,20 @@ echo "Adding library dependencies to rootfs"
 CROSS_COMPILE_SYS_ROOT=$(${CROSS_COMPILE}gcc --print-sysroot)
 
 # program interpreter: /lib/ld-linux-aarch64.so.1
-cp "${CROSS_COMPILE_LIBC_DIR}/lib64/ld-2.33.so" "${OUTDIR}/rootfs/lib64/"
-cp -a "${CROSS_COMPILE_LIBC_DIR}/lib/ld-linux-aarch64.so.1" "${OUTDIR}/rootfs/lib/"
+cp "${CROSS_COMPILE_SYS_ROOT}/lib64/ld-2.33.so" "${OUTDIR}/rootfs/lib64/"
+cp -a "${CROSS_COMPILE_SYS_ROOT}/lib/ld-linux-aarch64.so.1" "${OUTDIR}/rootfs/lib/"
 
 # Shared library: [libm.so.6]: libm.so.6 -> libm-2.33.so
-cp "${CROSS_COMPILE_LIBC_DIR}/lib64/libm.so.6" "${OUTDIR}/rootfs/lib64/"
-cp -a "${CROSS_COMPILE_LIBC_DIR}/lib64/libm-2.33.so" "${OUTDIR}/rootfs/lib64/"
+cp "${CROSS_COMPILE_SYS_ROOT}/lib64/libm.so.6" "${OUTDIR}/rootfs/lib64/"
+cp -a "${CROSS_COMPILE_SYS_ROOT}/lib64/libm-2.33.so" "${OUTDIR}/rootfs/lib64/"
 
 # Shared library: [libresolv.so.2]: libresolv.so.2 -> libresolv-2.33.so
-cp "${CROSS_COMPILE_LIBC_DIR}/lib64/libresolv.so.2" "${OUTDIR}/rootfs/lib64/"
-cp -a "${CROSS_COMPILE_LIBC_DIR}/lib64/libresolv-2.33.so" "${OUTDIR}/rootfs/lib64/"
+cp "${CROSS_COMPILE_SYS_ROOT}/lib64/libresolv.so.2" "${OUTDIR}/rootfs/lib64/"
+cp -a "${CROSS_COMPILE_SYS_ROOT}/lib64/libresolv-2.33.so" "${OUTDIR}/rootfs/lib64/"
 
 # Shared library: [libc.so.6]: libc.so.6 -> libc-2.33.so
-cp "${CROSS_COMPILE_LIBC_DIR}/lib64/libc.so.6" "${OUTDIR}/rootfs/lib64/"
-cp -a "${CROSS_COMPILE_LIBC_DIR}/lib64/libc-2.33.so" "${OUTDIR}/rootfs/lib64/"
+cp "${CROSS_COMPILE_SYS_ROOT}/lib64/libc.so.6" "${OUTDIR}/rootfs/lib64/"
+cp -a "${CROSS_COMPILE_SYS_ROOT}/lib64/libc-2.33.so" "${OUTDIR}/rootfs/lib64/"
 
 #############################################################################################
 
@@ -178,3 +178,5 @@ cd "${OUTDIR}/rootfs"
 find . | cpio -H newc -ov --owner root:root > ${OUTDIR}/initramfs.cpio
 
 gzip -f ${OUTDIR}/initramfs.cpio
+
+echo "Done"
