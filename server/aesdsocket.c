@@ -12,14 +12,63 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <pthread.h>
+#include "queue.h"
+#include <time.h>
 
 #define SERVER_PORT 9000
 #define FILE_PATH "/var/tmp/aesdsocketdata"
 #define BUFFER_SIZE 100
 
 int server_sockfd = -1;
-int client_sockfd = -1;
 char buffer[BUFFER_SIZE];
+
+pthread_mutex_t text_file_lock = PTHREAD_MUTEX_INITIALIZER;
+
+bool is_running = true;
+
+timer_t timer_id;
+
+//////////////// SLIST
+struct slist_element
+{
+    pthread_t thread_id;
+    bool thread_completed;
+
+    int socket_fd;
+
+    int text_fd;
+
+    SLIST_ENTRY(slist_element)
+    slist_elements;
+};
+
+SLIST_HEAD(slist_head, slist_element);
+
+struct slist_head head;
+/////////////////////////////
+
+void close_threads_res()
+{
+    struct slist_element *thread_in_list;
+
+    while (!SLIST_EMPTY(&head))
+    {
+        thread_in_list = SLIST_FIRST(&head);
+
+        thread_in_list->thread_completed = true;
+
+        pthread_join(thread_in_list->thread_id, NULL);
+
+        close(thread_in_list->text_fd);
+        close(thread_in_list->socket_fd);
+
+        SLIST_REMOVE_HEAD(&head, slist_elements);
+        free(thread_in_list);
+    }
+
+    pthread_mutex_destroy(&text_file_lock);
+}
 
 void signal_handler(int signo)
 {
@@ -27,11 +76,7 @@ void signal_handler(int signo)
     {
         syslog(LOG_INFO, "Caught signal %d, exiting...", signo);
 
-        // Close the client socket if it's open
-        if (client_sockfd != -1)
-        {
-            close(client_sockfd);
-        }
+        close_threads_res();
 
         // Close the server socket if it's open
         if (server_sockfd != -1)
@@ -49,45 +94,56 @@ void signal_handler(int signo)
             syslog(LOG_ERR, "Failed to remove file %s: %s", FILE_PATH, strerror(errno));
         }
 
+        timer_delete(timer_id);
+
         closelog(); // Close syslog
         exit(0);    // Exit the program
     }
 }
 
-void handle_connection(int client_fd)
+void *handle_connection(void *arg)
 {
+    struct slist_element *element = (struct slist_element *)arg;
 
     ssize_t bytes_received;
-    int fd;
 
-    fd = open(FILE_PATH, O_CREAT | O_APPEND | O_RDWR, 0644);
-    if (fd < 0)
+    element->text_fd = open(FILE_PATH, O_CREAT | O_APPEND | O_RDWR, 0644);
+    if (element->text_fd < 0)
     {
         syslog(LOG_ERR, "Error opening file: %s", strerror(errno));
-        return;
+        return arg;
     }
 
-    while ((bytes_received = recv(client_fd, buffer, BUFFER_SIZE - 1, 0)) > 0)
+    while (!element->thread_completed && (bytes_received = recv(element->socket_fd, buffer, BUFFER_SIZE - 1, 0)) > 0)
     {
         buffer[bytes_received] = '\0';
 
         char *newline = strchr(buffer, '\n');
         if (newline)
         {
+            pthread_mutex_lock(&text_file_lock);
+
             // Write data up to and including the newline
-            if (write(fd, buffer, newline - buffer + 1) < 0)
+            if (write(element->text_fd, buffer, newline - buffer + 1) < 0)
             {
                 syslog(LOG_ERR, "Error writing to file: %s", strerror(errno));
             }
+
+            pthread_mutex_unlock(&text_file_lock);
+
             break; // Exit loop after handling one packet
         }
         else
         {
+            pthread_mutex_lock(&text_file_lock);
+
             // Write the entire buffer if no newline is found
-            if (write(fd, buffer, bytes_received) < 0)
+            if (write(element->text_fd, buffer, bytes_received) < 0)
             {
                 syslog(LOG_ERR, "Error writing to file: %s", strerror(errno));
             }
+
+            pthread_mutex_unlock(&text_file_lock);
         }
     }
 
@@ -97,17 +153,22 @@ void handle_connection(int client_fd)
     }
 
     // Send the contents of the file back to the client
-    lseek(fd, 0, SEEK_SET);
-    while ((bytes_received = read(fd, buffer, BUFFER_SIZE)) > 0)
+    lseek(element->text_fd, 0, SEEK_SET);
+    while (!element->thread_completed && (bytes_received = read(element->text_fd, buffer, BUFFER_SIZE)) > 0)
     {
-        if (send(client_fd, buffer, bytes_received, 0) < 0)
+        if (send(element->socket_fd, buffer, bytes_received, 0) < 0)
         {
             syslog(LOG_ERR, "Error sending data: %s", strerror(errno));
             break;
         }
     }
 
-    close(fd);
+    close(element->text_fd);
+    close(element->socket_fd);
+
+    element->thread_completed = true;
+
+    return arg;
 }
 
 /*
@@ -182,6 +243,50 @@ void daemonize()
     close(STDERR_FILENO);
 }
 
+void check_completed_threads()
+{
+    // Check if other threads finished
+
+    struct slist_element *thread_in_list;
+
+    while (!SLIST_EMPTY(&head))
+    {
+        thread_in_list = SLIST_FIRST(&head);
+
+        if (thread_in_list->thread_completed)
+        {
+            pthread_join(thread_in_list->thread_id, NULL);
+            SLIST_REMOVE_HEAD(&head, slist_elements);
+            free(thread_in_list);
+        }
+    }
+}
+
+void timer_handler()
+{
+    time_t now;
+    char timestamp[100];
+
+    time(&now);
+    struct tm *time_info = localtime(&now);
+
+    // Format the timestamp according to RFC 2822
+    strftime(timestamp, sizeof(timestamp), "timestamp:%a, %d %b %Y %H:%M:%S %z\n", time_info);
+
+    // Write the timestamp to the file
+    pthread_mutex_lock(&text_file_lock);
+    FILE *file = fopen(FILE_PATH, "a");
+    if (file == NULL)
+    {
+        perror("Failed to open file for timestamp");
+        pthread_mutex_unlock(&text_file_lock);
+        return;
+    }
+    fputs(timestamp, file);
+    fclose(file);
+    pthread_mutex_unlock(&text_file_lock);
+}
+
 int main(int argc, char *argv[])
 {
     struct sigaction sa;
@@ -204,6 +309,9 @@ int main(int argc, char *argv[])
         syslog(LOG_ERR, "Error registering SIGTERM handler: %s", strerror(errno));
         return -1;
     }
+
+    // Remove the file if exists
+    remove(FILE_PATH);
 
     //////////////////////////////////////////////////////////////////////////////
 
@@ -258,6 +366,29 @@ int main(int argc, char *argv[])
         daemonize();
     }
 
+    struct itimerspec ts;
+    struct sigevent se;
+    /*
+     * Set the sigevent structure to cause the signal to be
+     * delivered by creating a new thread.
+     */
+    se.sigev_notify = SIGEV_THREAD;
+    se.sigev_value.sival_ptr = &timer_id;
+    se.sigev_notify_function = timer_handler;
+    se.sigev_notify_attributes = NULL;
+
+    ts.it_value.tv_sec = 10;
+    ts.it_value.tv_nsec = 0;
+    ts.it_interval.tv_sec = 10;
+    ts.it_interval.tv_nsec = 0;
+
+    // spawn timestamp logger thread? or timer
+    if (timer_create(CLOCK_REALTIME, &se, &timer_id) < 0)
+        perror("Create timer");
+
+    if (timer_settime(timer_id, 0, &ts, 0) < 0)
+        perror("Set timer");
+
     if (listen(server_sockfd, 5) == -1)
     {
         perror("listen");
@@ -265,10 +396,10 @@ int main(int argc, char *argv[])
     }
     printf("Listening on port %d\n", SERVER_PORT);
 
-    while (1)
+    while (is_running)
     {
         client_len = sizeof(client_address);
-        client_sockfd = accept(
+        int client_sockfd = accept(
             server_sockfd,
             (struct sockaddr *)&client_address,
             &client_len);
@@ -277,10 +408,21 @@ int main(int argc, char *argv[])
         syslog(LOG_DEBUG, "Accepted connection from %s", client_add);
         printf("server: got connection from %s\n", client_add);
 
-        handle_connection(client_sockfd);
+        struct slist_element *thread_element;
+        thread_element = calloc(sizeof(struct slist_element), 1);
+        thread_element->thread_completed = false;
+        thread_element->socket_fd = client_sockfd;
+        thread_element->text_fd = -1;
+        SLIST_INSERT_HEAD(&head, thread_element, slist_elements);
 
-        close(client_sockfd);
+        pthread_create(&thread_element->thread_id, NULL, handle_connection, thread_element);
+
+        check_completed_threads(&head);
     }
+
+    timer_delete(timer_id);
+
+    close_threads_res();
 
     closelog();
     return EXIT_SUCCESS;

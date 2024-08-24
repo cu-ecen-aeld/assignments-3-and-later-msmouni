@@ -1,6 +1,7 @@
 # Variables
 CC := gcc
 CFLAGS := -Wall -Wextra -Werror
+LIB := -lpthread -lrt
 CROSS_COMPILE ?= 
 TARGET := aesdsocket
 SRCS := aesdsocket.c
@@ -16,11 +17,11 @@ all: $(TARGET)
 
 # Build the target application
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) -o $@ $^ $(LIB) 
 
 # Compile source files into object files
 %.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) -c $< $(CFLAGS) -o $@
 
 # Clean target to remove generated files
 clean:
