@@ -21,7 +21,6 @@
 #define BUFFER_SIZE 100
 
 int server_sockfd = -1;
-char buffer[BUFFER_SIZE];
 
 pthread_mutex_t text_file_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -76,28 +75,7 @@ void signal_handler(int signo)
     {
         syslog(LOG_INFO, "Caught signal %d, exiting...", signo);
 
-        close_threads_res();
-
-        // Close the server socket if it's open
-        if (server_sockfd != -1)
-        {
-            close(server_sockfd);
-        }
-
-        // Remove the temporary file
-        if (remove(FILE_PATH) == 0)
-        {
-            syslog(LOG_INFO, "Removed file %s", FILE_PATH);
-        }
-        else
-        {
-            syslog(LOG_ERR, "Failed to remove file %s: %s", FILE_PATH, strerror(errno));
-        }
-
-        timer_delete(timer_id);
-
-        closelog(); // Close syslog
-        exit(0);    // Exit the program
+        is_running = false;
     }
 }
 
@@ -105,7 +83,9 @@ void *handle_connection(void *arg)
 {
     struct slist_element *element = (struct slist_element *)arg;
 
-    ssize_t bytes_received;
+    char buffer[BUFFER_SIZE] = {0};
+
+    ssize_t bytes_received = {0};
 
     element->text_fd = open(FILE_PATH, O_CREAT | O_APPEND | O_RDWR, 0644);
     if (element->text_fd < 0)
@@ -114,7 +94,7 @@ void *handle_connection(void *arg)
         return arg;
     }
 
-    while (!element->thread_completed && (bytes_received = recv(element->socket_fd, buffer, BUFFER_SIZE - 1, 0)) > 0)
+    while (is_running && (bytes_received = recv(element->socket_fd, buffer, BUFFER_SIZE - 1, 0)) > 0)
     {
         buffer[bytes_received] = '\0';
 
@@ -163,8 +143,16 @@ void *handle_connection(void *arg)
         }
     }
 
-    close(element->text_fd);
-    close(element->socket_fd);
+    if (element->text_fd != -1)
+    {
+
+        close(element->text_fd);
+    }
+
+    if (element->socket_fd != -1)
+    {
+        close(element->socket_fd);
+    }
 
     element->thread_completed = true;
 
@@ -243,25 +231,6 @@ void daemonize()
     close(STDERR_FILENO);
 }
 
-void check_completed_threads()
-{
-    // Check if other threads finished
-
-    struct slist_element *thread_in_list;
-
-    while (!SLIST_EMPTY(&head))
-    {
-        thread_in_list = SLIST_FIRST(&head);
-
-        if (thread_in_list->thread_completed)
-        {
-            pthread_join(thread_in_list->thread_id, NULL);
-            SLIST_REMOVE_HEAD(&head, slist_elements);
-            free(thread_in_list);
-        }
-    }
-}
-
 void timer_handler()
 {
     time_t now;
@@ -289,9 +258,11 @@ void timer_handler()
 
 int main(int argc, char *argv[])
 {
-    struct sigaction sa;
-
     openlog("aesdsocket", LOG_PID, LOG_USER);
+
+    SLIST_INIT(&head);
+
+    struct sigaction sa = {0};
 
     // Register the signal handler for SIGINT and SIGTERM
     sa.sa_handler = signal_handler;
@@ -326,7 +297,7 @@ int main(int argc, char *argv[])
     }
 
     /////////////////////////////////////////
-    socklen_t client_len;
+    socklen_t client_len = 0;
     struct sockaddr_in client_address = {0};
     struct sockaddr_in server_address = {0};
     ////////////////////////////////////////
@@ -366,8 +337,8 @@ int main(int argc, char *argv[])
         daemonize();
     }
 
-    struct itimerspec ts;
-    struct sigevent se;
+    struct itimerspec ts = {0};
+    struct sigevent se = {0};
     /*
      * Set the sigevent structure to cause the signal to be
      * delivered by creating a new thread.
@@ -416,14 +387,15 @@ int main(int argc, char *argv[])
         SLIST_INSERT_HEAD(&head, thread_element, slist_elements);
 
         pthread_create(&thread_element->thread_id, NULL, handle_connection, thread_element);
-
-        check_completed_threads(&head);
     }
 
     timer_delete(timer_id);
 
     close_threads_res();
 
+    close(server_sockfd);
+
     closelog();
+
     return EXIT_SUCCESS;
 }
