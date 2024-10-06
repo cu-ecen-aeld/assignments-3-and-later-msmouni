@@ -17,7 +17,7 @@ all: $(TARGET)
 
 # Build the target application
 $(TARGET): $(OBJS)
-	$(CC) -o $@ $^ $(LIB) 
+	$(CC) -o $@ $^ $(LIB) ${LDFLAGS}
 
 # Compile source files into object files
 %.o: %.c
