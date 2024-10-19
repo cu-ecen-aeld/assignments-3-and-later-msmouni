@@ -16,15 +16,33 @@
 #include <linux/printk.h>
 #include <linux/types.h>
 #include <linux/cdev.h>
-#include <linux/fs.h> // file_operations
+#include <linux/fs.h>      // file_operations
+#include <linux/uaccess.h> // Required for the copy_to_user and copy_from_user functions
+#include <linux/slab.h>    // For kmalloc and kfree
+#include <linux/string.h>  // Required for strchr()
 #include "aesdchar.h"
+
 int aesd_major = 0; // use dynamic major
 int aesd_minor = 0;
 
-MODULE_AUTHOR("Your Name Here"); /** TODO: fill in your name **/
+MODULE_AUTHOR("msmouni");
 MODULE_LICENSE("Dual BSD/GPL");
 
 struct aesd_dev aesd_device;
+
+// Function prototypes for file operations
+int aesd_open(struct inode *inode, struct file *filp);
+int aesd_release(struct inode *inode, struct file *filp);
+ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
+                  loff_t *f_pos);
+ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
+                   loff_t *f_pos);
+
+// Init function prototype
+int aesd_init_module(void);
+
+// Cleanup module prototype
+void aesd_cleanup_module(void);
 
 int aesd_open(struct inode *inode, struct file *filp)
 {
@@ -60,9 +78,40 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 {
     ssize_t retval = -ENOMEM;
     PDEBUG("write %zu bytes with offset %lld", count, *f_pos);
-    /**
-     * TODO: handle write
-     */
+
+    // Allocate (or reallocate) memory using krealloc
+    aesd_device.input_buffer = krealloc(aesd_device.input_buffer, aesd_device.input_size + count, GFP_KERNEL);
+    if (!aesd_device.input_buffer)
+    {
+        printk(KERN_ALERT "Memory allocation failed\n");
+        return -ENOMEM;
+    }
+
+    // Copy the input data from user space to the kernel buffer
+    if (copy_from_user(aesd_device.input_buffer + aesd_device.input_size, buf, count))
+    {
+        printk(KERN_ALERT "Simple Char Device: Failed to receive data from user\n");
+        return -EFAULT;
+    }
+
+    // Check if the input buffer contains a newline character
+    char *newline = strchr(aesd_device.input_buffer, '\n');
+    if (newline)
+    {
+        struct aesd_buffer_entry *new_entry;
+        new_entry->size = aesd_device.input_size + count;
+        new_entry->buffptr = krealloc(aesd_device.input_buffer, aesd_device.input_size + count, GFP_KERNEL);
+        memcpy(&new_entry->buffptr, aesd_device.input_buffer, new_entry->size);
+
+        if (aesd_device.circular_buff.full)
+        {
+            kfree(aesd_circular_buffer_pop_entry(&aesd_device.circular_buff));
+        }
+        aesd_circular_buffer_add_entry(&aesd_device.circular_buff, new_entry);
+
+        kfree(aesd_device.input_buffer);
+    }
+
     return retval;
 }
 struct file_operations aesd_fops = {
@@ -108,6 +157,10 @@ int aesd_init_module(void)
 
     result = aesd_setup_cdev(&aesd_device);
 
+    aesd_device.input_buffer = NULL;
+    aesd_device.input_size = 0;
+    aesd_circular_buffer_init(&aesd_device.circular_buff);
+
     if (result)
     {
         unregister_chrdev_region(dev, 1);
@@ -124,6 +177,12 @@ void aesd_cleanup_module(void)
     /**
      * TODO: cleanup AESD specific poritions here as necessary
      */
+    uint32_t index;
+    struct aesd_buffer_entry *entry;
+    AESD_CIRCULAR_BUFFER_FOREACH(entry, &aesd_device.circular_buff, index)
+    {
+        kfree(entry->buffptr);
+    }
 
     unregister_chrdev_region(devno, 1);
 }

@@ -79,6 +79,19 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
     buffer->full = buffer->in_offs == buffer->out_offs;
 }
 
+// Note: memory should be freed by caller
+struct aesd_buffer_entry *aesd_circular_buffer_pop_entry(struct aesd_circular_buffer *buffer)
+{
+    if (!buffer->entry[buffer->out_offs].buffptr)
+    {
+        buffer->out_offs = (buffer->out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+
+        return &buffer->entry[buffer->out_offs];
+    }
+
+    return NULL;
+}
+
 /**
  * Initializes the circular buffer described by @param buffer to an empty struct
  */
