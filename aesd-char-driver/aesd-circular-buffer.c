@@ -79,17 +79,47 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
     buffer->full = buffer->in_offs == buffer->out_offs;
 }
 
-// Note: memory should be freed by caller
-struct aesd_buffer_entry *aesd_circular_buffer_pop_entry(struct aesd_circular_buffer *buffer)
+struct aesd_buffer_entry aesd_circular_buffer_pop_entry(struct aesd_circular_buffer *buffer)
 {
-    if (!buffer->entry[buffer->out_offs].buffptr)
-    {
-        buffer->out_offs = (buffer->out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+    struct aesd_buffer_entry res_entry = {.buffptr = NULL, .size = 0};
 
-        return &buffer->entry[buffer->out_offs];
+    if (buffer->entry[buffer->out_offs].buffptr)
+    {
+        res_entry.buffptr = buffer->entry[buffer->out_offs].buffptr;
+        res_entry.size = buffer->entry[buffer->out_offs].size;
+
+        buffer->entry[buffer->out_offs].buffptr = NULL;
+        buffer->entry[buffer->out_offs].size = 0;
+
+        uint8_t new_offs = (buffer->out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+
+        if (new_offs != buffer->in_offs)
+        {
+            buffer->out_offs = new_offs;
+        }
     }
 
-    return NULL;
+    return res_entry;
+}
+
+size_t aesd_buffer_size(struct aesd_circular_buffer *buffer)
+{
+    uint8_t index;
+    struct aesd_buffer_entry *entry;
+    size_t total_size = 0;
+
+    bool include_in_offs = buffer->full;
+
+    for (index = buffer->out_offs; include_in_offs || index != buffer->in_offs; index = (index + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
+    {
+        include_in_offs = false;
+
+        entry = &buffer->entry[index];
+
+        total_size += entry->size;
+    }
+
+    return total_size;
 }
 
 /**
