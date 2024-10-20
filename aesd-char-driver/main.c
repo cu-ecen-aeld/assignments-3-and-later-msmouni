@@ -65,17 +65,29 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
      * TODO: handle read
      */
 
+    /*
+        mutex_lock_interruptible() is used instead of mutex_lock() because it can be interrupted (e.g., by signals), allowing the function to return immediately if the lock can't be acquired. This prevents the process from being indefinitely stuck in certain situations.
+        */
+    if (mutex_lock_interruptible(&aesd_device.buffer_lock))
+    {
+        printk(KERN_ALERT "Failed to acquire mutex\n");
+        mutex_unlock(&aesd_device.buffer_lock);
+        return -ERESTARTSYS; // Return if interrupted while waiting for the lock
+    }
+
     size_t total_buff_size = aesd_buffer_size(&aesd_device.circular_buff);
 
     if (*f_pos >= (total_buff_size + aesd_device.input_size))
     {
+        mutex_unlock(&aesd_device.buffer_lock);
         return 0; // EOF
     }
     else if (*f_pos >= total_buff_size)
     {
         if (copy_to_user(buf, &aesd_device.input_buffer[*f_pos - total_buff_size], count))
         {
-            printk(KERN_ALERT "Simple Char Device: Failed to send message to user\n");
+            printk(KERN_ALERT "Failed to send message to user\n");
+            mutex_unlock(&aesd_device.buffer_lock);
             return -EFAULT;
         }
     }
@@ -92,12 +104,14 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 
             if (copy_to_user(buf, &entry_at_pos->buffptr[entry_offset_byte_rtn], bytes_to_read))
             {
-                printk(KERN_ALERT "Simple Char Device: Failed to send message to user\n");
+                printk(KERN_ALERT "Failed to send message to user\n");
+                mutex_unlock(&aesd_device.buffer_lock);
                 return -EFAULT;
             }
         }
     }
 
+    mutex_unlock(&aesd_device.buffer_lock);
     return retval;
 }
 
@@ -107,18 +121,30 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     ssize_t retval = -ENOMEM;
     PDEBUG("write %zu bytes with offset %lld", count, *f_pos);
 
+    /*
+    mutex_lock_interruptible() is used instead of mutex_lock() because it can be interrupted (e.g., by signals), allowing the function to return immediately if the lock can't be acquired. This prevents the process from being indefinitely stuck in certain situations.
+    */
+    if (mutex_lock_interruptible(&aesd_device.buffer_lock))
+    {
+        printk(KERN_ALERT "Failed to acquire mutex\n");
+        mutex_unlock(&aesd_device.buffer_lock);
+        return -ERESTARTSYS; // Return if interrupted while waiting for the lock
+    }
+
     // Allocate (or reallocate) memory using krealloc
     aesd_device.input_buffer = krealloc(aesd_device.input_buffer, aesd_device.input_size + count, GFP_KERNEL);
     if (!aesd_device.input_buffer)
     {
         printk(KERN_ALERT "Memory allocation failed\n");
+        mutex_unlock(&aesd_device.buffer_lock);
         return -ENOMEM;
     }
 
     // Copy the input data from user space to the kernel buffer
     if (copy_from_user(aesd_device.input_buffer + aesd_device.input_size, buf, count))
     {
-        printk(KERN_ALERT "Simple Char Device: Failed to receive data from user\n");
+        printk(KERN_ALERT "Failed to receive data from user\n");
+        mutex_unlock(&aesd_device.buffer_lock);
         return -EFAULT;
     }
 
@@ -143,6 +169,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         kfree(aesd_device.input_buffer);
     }
 
+    mutex_unlock(&aesd_device.buffer_lock);
     return retval;
 }
 struct file_operations aesd_fops = {
@@ -197,6 +224,7 @@ int aesd_init_module(void)
     aesd_device.input_buffer = NULL;
     aesd_device.input_size = 0;
     aesd_circular_buffer_init(&aesd_device.circular_buff);
+    mutex_init(&aesd_device.buffer_lock);
 
     if (result)
     {
@@ -220,6 +248,7 @@ void aesd_cleanup_module(void)
     {
         kfree(entry->buffptr);
     }
+    mutex_destroy(&aesd_device.buffer_lock);
 
     unregister_chrdev_region(devno, 1);
 }

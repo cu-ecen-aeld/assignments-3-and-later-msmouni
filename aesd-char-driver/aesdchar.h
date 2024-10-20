@@ -9,6 +9,7 @@
 #define AESD_CHAR_DRIVER_AESDCHAR_H_
 
 #include "aesd-circular-buffer.h"
+#include <linux/mutex.h> // For mutex
 
 #define AESD_DEBUG 1 // Remove comment on this line to enable debug
 
@@ -35,6 +36,8 @@ struct aesd_dev
      char *input_buffer; // Buffer for accumulating input dynamically
      size_t input_size;
      struct aesd_circular_buffer circular_buff;
+
+     struct mutex buffer_lock;
 };
 
 #endif /* AESD_CHAR_DRIVER_AESDCHAR_H_ */
