@@ -16,8 +16,12 @@
 #include <linux/printk.h>
 #include <linux/types.h>
 #include <linux/cdev.h>
-#include <linux/fs.h> // file_operations
+#include <linux/fs.h>      // file_operations
+#include <linux/uaccess.h> // Required for the copy_to_user and copy_from_user functions
+#include <linux/slab.h>    // For kmalloc and kfree
+#include <linux/string.h>  // Required for strchr()
 #include "aesdchar.h"
+
 int aesd_major = 0; // use dynamic major
 int aesd_minor = 0;
 
@@ -71,6 +75,45 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     /**
      * TODO: handle write
      */
+
+    // Allocate (or reallocate) memory using krealloc
+    aesd_device.input_buffer = krealloc(aesd_device.input_buffer, aesd_device.input_size + count, GFP_KERNEL);
+    if (!aesd_device.input_buffer)
+    {
+        printk(KERN_ALERT "Memory allocation failed\n");
+        return -ENOMEM;
+    }
+
+    // Copy the input data from user space to the kernel buffer
+    if (copy_from_user(aesd_device.input_buffer + aesd_device.input_size, buf, count))
+    {
+        printk(KERN_ALERT "Failed to receive data from user\n");
+        return -EFAULT;
+    }
+
+    retval = count;
+    aesd_device.input_size += count;
+
+    // Check if the input buffer contains a newline character
+    char *newline = strchr(aesd_device.input_buffer, '\n');
+    if (newline)
+    {
+        struct aesd_buffer_entry *new_entry = kmalloc(sizeof(struct aesd_buffer_entry), GFP_KERNEL);
+        new_entry->size = aesd_device.input_size;
+        new_entry->buffptr = aesd_device.input_buffer;
+
+        if (aesd_device.circular_buff.full)
+        {
+            struct aesd_buffer_entry pop_entry = aesd_circular_buffer_pop_entry(&aesd_device.circular_buff);
+            kfree(pop_entry.buffptr);
+        }
+
+        aesd_circular_buffer_add_entry(&aesd_device.circular_buff, new_entry);
+
+        aesd_device.input_buffer = NULL;
+        aesd_device.input_size = 0;
+    }
+
     return retval;
 }
 struct file_operations aesd_fops = {
