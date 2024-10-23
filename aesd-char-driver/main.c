@@ -64,7 +64,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 
     /*
         mutex_lock_interruptible() is used instead of mutex_lock() because it can be interrupted (e.g., by signals), allowing the function to return immediately if the lock can't be acquired. This prevents the process from being indefinitely stuck in certain situations.
-     */
+        */
     if (mutex_lock_interruptible(&aesd_device.buffer_lock))
     {
         printk(KERN_ALERT "Failed to acquire mutex\n");
@@ -122,7 +122,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 
     /*
     mutex_lock_interruptible() is used instead of mutex_lock() because it can be interrupted (e.g., by signals), allowing the function to return immediately if the lock can't be acquired. This prevents the process from being indefinitely stuck in certain situations.
-     */
+    */
     if (mutex_lock_interruptible(&aesd_device.buffer_lock))
     {
         printk(KERN_ALERT "Failed to acquire mutex\n");
@@ -221,9 +221,17 @@ int aesd_init_module(void)
 
     result = aesd_setup_cdev(&aesd_device);
 
+    aesd_device.input_buffer = NULL;
+    aesd_device.input_size = 0;
+    aesd_circular_buffer_init(&aesd_device.circular_buff);
+    mutex_init(&aesd_device.buffer_lock);
+
     if (result)
     {
+
         unregister_chrdev_region(dev, 1);
+
+        mutex_destroy(&aesd_device.buffer_lock);
     }
     return result;
 }
@@ -237,6 +245,18 @@ void aesd_cleanup_module(void)
     /**
      * TODO: cleanup AESD specific poritions here as necessary
      */
+    uint32_t index;
+    struct aesd_buffer_entry *entry;
+    AESD_CIRCULAR_BUFFER_FOREACH(entry, &aesd_device.circular_buff, index)
+    {
+        kfree(entry->buffptr);
+    }
+
+    if (aesd_device.input_buffer)
+    {
+        kfree(aesd_device.input_buffer);
+    }
+    mutex_destroy(&aesd_device.buffer_lock);
 
     unregister_chrdev_region(devno, 1);
 }
