@@ -26,6 +26,14 @@ MODULE_LICENSE("Dual BSD/GPL");
 
 struct aesd_dev aesd_device;
 
+// Function prototypes for file operations
+int aesd_open(struct inode *inode, struct file *filp);
+int aesd_release(struct inode *inode, struct file *filp);
+ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
+                  loff_t *f_pos);
+ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
+                   loff_t *f_pos);
+
 int aesd_open(struct inode *inode, struct file *filp)
 {
     PDEBUG("open");
@@ -72,6 +80,12 @@ struct file_operations aesd_fops = {
     .open = aesd_open,
     .release = aesd_release,
 };
+
+// Init function prototype
+int aesd_init_module(void);
+
+// Cleanup module prototype
+void aesd_cleanup_module(void);
 
 static int aesd_setup_cdev(struct aesd_dev *dev)
 {
