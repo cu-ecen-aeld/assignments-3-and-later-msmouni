@@ -56,6 +56,10 @@ extern struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos
 
 extern void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry);
 
+extern struct aesd_buffer_entry aesd_circular_buffer_pop_entry(struct aesd_circular_buffer *buffer);
+
+extern size_t aesd_buffer_size(struct aesd_circular_buffer *buffer);
+
 extern void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer);
 
 /**
