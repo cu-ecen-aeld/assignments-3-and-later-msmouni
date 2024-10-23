@@ -64,6 +64,43 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     /**
      * TODO: handle read
      */
+
+    size_t total_buff_size = aesd_buffer_size(&aesd_device.circular_buff);
+
+    if (*f_pos >= (total_buff_size + aesd_device.input_size))
+    {
+        return 0; // EOF
+    }
+    else if (*f_pos >= total_buff_size)
+    {
+        if (copy_to_user(buf, &aesd_device.input_buffer[*f_pos - total_buff_size], count))
+        {
+            printk(KERN_ALERT "Failed to send message to user\n");
+            return -EFAULT;
+        }
+    }
+    else
+    {
+        size_t entry_offset_byte_rtn;
+
+        struct aesd_buffer_entry *entry_at_pos = aesd_circular_buffer_find_entry_offset_for_fpos(&aesd_device.circular_buff,
+                                                                                                 *f_pos, &entry_offset_byte_rtn);
+
+        if (entry_at_pos)
+        {
+            size_t bytes_to_read = min(count, entry_at_pos->size - entry_offset_byte_rtn);
+
+            if (copy_to_user(buf, &entry_at_pos->buffptr[entry_offset_byte_rtn], bytes_to_read))
+            {
+                printk(KERN_ALERT "Failed to send message to user\n");
+                return -EFAULT;
+            }
+
+            retval = bytes_to_read;
+            *f_pos += bytes_to_read;
+        }
+    }
+
     return retval;
 }
 
