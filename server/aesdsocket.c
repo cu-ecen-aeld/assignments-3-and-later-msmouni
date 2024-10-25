@@ -16,8 +16,18 @@
 #include "queue.h"
 #include <time.h>
 
+#define USE_AESD_CHAR_DEVICE 1
+
+#ifndef USE_AESD_CHAR_DEVICE
+// Read/Write from the file
+#define SOCKET_RW "/var/tmp/aesdsocketdata"
+#else
+// Read/Write from the char device
+#define SOCKET_RW "/dev/aesdchar"
+#endif // USE_AESD_CHAR_DEVICE
+
 #define SERVER_PORT 9000
-#define FILE_PATH "/var/tmp/aesdsocketdata"
+
 #define BUFFER_SIZE 100
 
 int server_sockfd = -1;
@@ -87,7 +97,7 @@ void *handle_connection(void *arg)
 
     ssize_t bytes_received = {0};
 
-    element->text_fd = open(FILE_PATH, O_CREAT | O_APPEND | O_RDWR, 0644);
+    element->text_fd = open(SOCKET_RW, O_CREAT | O_APPEND | O_RDWR, 0644);
     if (element->text_fd < 0)
     {
         syslog(LOG_ERR, "Error opening file: %s", strerror(errno));
@@ -244,7 +254,7 @@ void timer_handler()
 
     // Write the timestamp to the file
     pthread_mutex_lock(&text_file_lock);
-    FILE *file = fopen(FILE_PATH, "a");
+    FILE *file = fopen(SOCKET_RW, "a");
     if (file == NULL)
     {
         perror("Failed to open file for timestamp");
@@ -281,8 +291,10 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+#ifndef USE_AESD_CHAR_DEVICE
     // Remove the file if exists
-    remove(FILE_PATH);
+    remove(SOCKET_RW);
+#endif
 
     //////////////////////////////////////////////////////////////////////////////
 
@@ -337,6 +349,7 @@ int main(int argc, char *argv[])
         daemonize();
     }
 
+#ifndef USE_AESD_CHAR_DEVICE
     struct itimerspec ts = {0};
     struct sigevent se = {0};
     /*
@@ -359,6 +372,7 @@ int main(int argc, char *argv[])
 
     if (timer_settime(timer_id, 0, &ts, 0) < 0)
         perror("Set timer");
+#endif
 
     if (listen(server_sockfd, 5) == -1)
     {
