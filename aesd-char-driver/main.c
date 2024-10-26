@@ -37,6 +37,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
                   loff_t *f_pos);
 ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
                    loff_t *f_pos);
+loff_t aesd_llseek(struct file *filp, loff_t offset, int whence);
 
 int aesd_open(struct inode *inode, struct file *filp)
 {
@@ -172,12 +173,66 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     mutex_unlock(&aesd_device.buffer_lock);
     return retval;
 }
+
+loff_t aesd_llseek(struct file *filp, loff_t offset, int whence)
+{
+    loff_t new_position;
+
+    int full_data_size = aesd_buffer_size(&aesd_device.circular_buff) + aesd_device.input_size;
+
+    // Acquire the lock to ensure thread safety
+    if (mutex_lock_interruptible(&aesd_device.buffer_lock))
+    {
+        return -ERESTARTSYS; // Return if interrupted while waiting for the lock
+    }
+
+    new_position = fixed_size_llseek(filp, offset, whence, full_data_size);
+
+    /*switch (whence)
+    {
+    case SEEK_SET:
+        // Set the position to the specified offset
+        new_position = offset;
+        break;
+
+    case SEEK_CUR:
+        // Move the position by the offset from the current position
+        new_position = filp->f_pos + offset;
+        break;
+
+    case SEEK_END:
+        // Set the position to the end of the buffer
+        new_position = full_data_size;
+        break;
+
+    default:
+        // Invalid 'whence' value
+        mutex_unlock(&aesd_device.buffer_lock);
+        return -EINVAL;
+    }
+
+    // Ensure new_position is within bounds
+    if (new_position < 0 || new_position > full_data_size)
+    {
+        mutex_unlock(&aesd_device.buffer_lock);
+        return -EINVAL; // Invalid position
+    }
+
+    // Update the file position
+    filp->f_pos = new_position;*/
+
+    // Release the lock before returning
+    mutex_unlock(&aesd_device.buffer_lock);
+    return new_position;
+}
+
 struct file_operations aesd_fops = {
     .owner = THIS_MODULE,
     .read = aesd_read,
     .write = aesd_write,
     .open = aesd_open,
     .release = aesd_release,
+    .llseek = aesd_llseek,
 };
 
 // Init function prototype
