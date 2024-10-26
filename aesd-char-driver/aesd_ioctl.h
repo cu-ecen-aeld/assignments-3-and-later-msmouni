@@ -22,7 +22,8 @@
  * A structure to be passed by IOCTL from user space to kernel space, describing the type
  * of seek performed on the aesdchar driver
  */
-struct aesd_seekto {
+struct aesd_seekto
+{
     /**
      * The zero referenced write command to seek into
      */
