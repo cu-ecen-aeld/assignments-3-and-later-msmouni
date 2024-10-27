@@ -236,6 +236,7 @@ long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
     switch (cmd)
     {
     case AESDCHAR_IOCSEEKTO:
+    {
         struct aesd_seekto seekto;
 
         if (copy_from_user(&seekto, (const void __user *)arg, sizeof(seekto)) != 0)
@@ -284,6 +285,7 @@ long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
         }
 
         break;
+    }
     default:
         retval = -ENOTTY; // Command not recognized
         break;
