@@ -15,6 +15,7 @@
 #include <pthread.h>
 #include "queue.h"
 #include <time.h>
+#include "../aesd-char-driver/aesd_ioctl.h"
 
 #define USE_AESD_CHAR_DEVICE 1
 
@@ -113,10 +114,32 @@ void *handle_connection(void *arg)
         {
             pthread_mutex_lock(&text_file_lock);
 
-            // Write data up to and including the newline
-            if (write(element->text_fd, buffer, newline - buffer + 1) < 0)
+            /*
+            Assignment 9: When the string sent over the socket equals AESDCHAR_IOCSEEKTO:X,Y where X and Y are unsigned decimal integer values, the X should be considered the write command to seek into and the Y should be considered the offset within the write command.
+            */
+            unsigned int write_cmd;
+            unsigned int offset;
+
+            // Use sscanf to extract the prefix and the integers X and Y
+            if (sscanf(buffer, "AESDCHAR_IOCSEEKTO:%u,%u", &write_cmd, &offset) == 2)
             {
-                syslog(LOG_ERR, "Error writing to file: %s", strerror(errno));
+                // If both X and Y are successfully scanned and the prefix matches "AESDCHAR_IOCSEEKTO:X,Y"
+
+                struct aesd_seekto seekto;
+                seekto.write_cmd = write_cmd;
+                seekto.write_cmd_offset = offset;
+
+                ioctl(element->text_fd, AESDCHAR_IOCSEEKTO, &seekto);
+            }
+            else
+            {
+                // Write data up to and including the newline
+                if (write(element->text_fd, buffer, newline - buffer + 1) < 0)
+                {
+                    syslog(LOG_ERR, "Error writing to file: %s", strerror(errno));
+                }
+
+                lseek(element->text_fd, 0, SEEK_SET);
             }
 
             pthread_mutex_unlock(&text_file_lock);
@@ -143,7 +166,6 @@ void *handle_connection(void *arg)
     }
 
     // Send the contents of the file back to the client
-    lseek(element->text_fd, 0, SEEK_SET);
     while (!element->thread_completed && (bytes_received = read(element->text_fd, buffer, BUFFER_SIZE)) > 0)
     {
         if (send(element->socket_fd, buffer, bytes_received, 0) < 0)
