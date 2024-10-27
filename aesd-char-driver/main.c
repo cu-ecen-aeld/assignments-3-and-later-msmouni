@@ -151,6 +151,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
 
     retval = count;
     aesd_device.input_size += count;
+    *f_pos += count;
 
     // Check if the input buffer contains a newline character
     char *newline = strchr(aesd_device.input_buffer, '\n');
