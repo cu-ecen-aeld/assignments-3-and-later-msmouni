@@ -21,6 +21,7 @@
 #include <linux/slab.h>    // For kmalloc and kfree
 #include <linux/string.h>  // Required for strchr()
 #include "aesdchar.h"
+#include "aesd_ioctl.h"
 
 int aesd_major = 0; // use dynamic major
 int aesd_minor = 0;
@@ -38,6 +39,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
                    loff_t *f_pos);
 loff_t aesd_llseek(struct file *filp, loff_t offset, int whence);
+long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
 
 int aesd_open(struct inode *inode, struct file *filp)
 {
@@ -226,6 +228,69 @@ loff_t aesd_llseek(struct file *filp, loff_t offset, int whence)
     return new_position;
 }
 
+long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    long retval = 0;
+
+    switch (cmd)
+    {
+    case AESDCHAR_IOCSEEKTO:
+        struct aesd_seekto seekto;
+
+        if (copy_from_user(&seekto, (const void __user *)arg, sizeof(seekto)) != 0)
+        {
+            printk(KERN_ALERT "Failed copy aesd_seekto from user\n");
+            return -EFAULT;
+        }
+        else
+        {
+            if (seekto.write_cmd >= AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED)
+            {
+                return -EINVAL; // Invalid command index
+            }
+
+            if (mutex_lock_interruptible(&aesd_device.buffer_lock))
+            {
+                return -ERESTARTSYS; // Return if interrupted while waiting for the lock
+            }
+
+            int index;
+
+            loff_t new_pos = 0;
+
+            for (index = 0; index < seekto.write_cmd; index++)
+            {
+                new_pos += aesd_device.circular_buff.entry[index].size;
+            }
+
+            if (seekto.write_cmd_offset >= aesd_device.circular_buff.entry[index].size)
+            {
+                mutex_unlock(&aesd_device.buffer_lock);
+                return -EINVAL; // Invalid command offset
+            }
+            else
+            {
+                new_pos += seekto.write_cmd_offset;
+            }
+
+            mutex_unlock(&aesd_device.buffer_lock);
+
+            filp->f_pos = new_pos;
+            retval = new_pos;
+
+            PDEBUG("Seek to command %u, offset %u, new position %lld\n",
+                   seekto.write_cmd, seekto.write_cmd_offset, filp->f_pos);
+        }
+
+        break;
+    default:
+        retval = -ENOTTY; // Command not recognized
+        break;
+    }
+
+    return retval;
+}
+
 struct file_operations aesd_fops = {
     .owner = THIS_MODULE,
     .read = aesd_read,
@@ -233,6 +298,7 @@ struct file_operations aesd_fops = {
     .open = aesd_open,
     .release = aesd_release,
     .llseek = aesd_llseek,
+    .unlocked_ioctl = aesd_ioctl,
 };
 
 // Init function prototype
